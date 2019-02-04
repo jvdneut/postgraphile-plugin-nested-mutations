@@ -24,7 +24,7 @@
   },
   "devDependencies": {
     "@graphile-contrib/pg-simplify-inflector": "^4.0.0-alpha.0",
-    "eslint": "^5.10.0",
+    "eslint": "5.13.0",
     "eslint-config-airbnb-base": "^13.1.0",
     "eslint-plugin-import": "^2.14.0",
     "graphql": "^14.0.2",
