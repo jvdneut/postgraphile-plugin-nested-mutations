@@ -234,8 +234,9 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 			{},
 		);
 
+		const x = Math.ceil(Math.random() * 100);
 		try {
-			await pgClient.query('SAVEPOINT graphql_nested_mutation');
+			await pgClient.query('SAVEPOINT graphql_nested_mutation' + x);
 
 			// run forward nested mutations
 			const forwardOutput = await recurseForwardNestedMutations(
@@ -579,19 +580,20 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 				mutationData = finalRows[0];
 			}
 
-			await pgClient.query('RELEASE SAVEPOINT graphql_nested_mutation');
+			await pgClient.query('RELEASE SAVEPOINT graphql_nested_mutation' + x);
 			return {
 				clientMutationId: input.clientMutationId,
 				data: mutationData,
 			};
 		} catch (e) {
 			debug(e);
-			await pgClient.query('ROLLBACK TO SAVEPOINT graphql_nested_mutation');
+			await pgClient.query('ROLLBACK TO SAVEPOINT graphql_nested_mutation' + x);
 			throw e;
 		}
 	};
 
 	if (isPgCreateMutationField) {
+		console.log('here', table);
 		pgNestedResolvers[table.id] = newResolver;
 	}
 
