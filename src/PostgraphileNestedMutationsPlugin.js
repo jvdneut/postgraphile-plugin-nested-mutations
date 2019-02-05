@@ -51,17 +51,141 @@ const graphQLInputObjectTypeFieldsHook = (fields, build, context) => {
 	return Object.assign({}, fields, nestedFields);
 };
 
-const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
+const pgCreateMutationField = ({ table, build, context }, inputData) => {
+	const {
+		inflection,
+		pgSql: sql,
+		pgOmit: omit,
+		gql2pg,
+		pgColumnFilter,
+	} = build;
+
+	const sqlColumns = [];
+	const sqlValues = [];
+	table.attributes
+		.filter(attr => pgColumnFilter(attr, build, context))
+		.filter(attr => !omit(attr, 'create'))
+		.forEach(attr => {
+			const fieldName = inflection.column(attr);
+			const val = inputData[fieldName];
+			if (Object.prototype.hasOwnProperty.call(inputData, fieldName)) {
+				sqlColumns.push(sql.identifier(attr.name));
+				sqlValues.push(gql2pg(val, attr.type, attr.typeModifier));
+			}
+		});
+
+	/* eslint indent: 0 */
+	const mutationQuery = sql.query`
+		insert into ${sql.identifier(table.namespace.name, table.name)}
+			${
+				sqlColumns.length
+					? sql.fragment`(
+						${sql.join(sqlColumns, ', ')}
+					) values(${sql.join(sqlValues, ', ')})`
+					: sql.fragment`default values`
+			} returning *`;
+
+	return mutationQuery;
+};
+
+const pgUpdateMutationField = ({ table, build, context }, input, inputData) => {
 	const {
 		inflection,
 		nodeIdFieldName,
 		pgSql: sql,
 		pgOmit: omit,
 		gql2pg,
-		parseResolveInfo,
-		getTypeByName,
 		getTypeAndIdentifiersFromNodeId,
 		pgColumnFilter,
+		pgGetGqlTypeByTypeIdAndModifier,
+		pgFieldConstraint,
+	} = build;
+
+	const {
+		scope: { isPgNodeMutation },
+	} = context;
+
+	const TableType = pgGetGqlTypeByTypeIdAndModifier(table.type.id, null);
+
+	const sqlColumns = [];
+	const sqlValues = [];
+	let condition = null;
+
+	if (isPgNodeMutation) {
+		const nodeId = input[nodeIdFieldName];
+		try {
+			const { Type, identifiers } = getTypeAndIdentifiersFromNodeId(nodeId);
+			const primaryKeys = table.primaryKeyConstraint.keyAttributes;
+			if (Type !== TableType) {
+				throw new Error('Mismatched type');
+			}
+			if (identifiers.length !== primaryKeys.length) {
+				throw new Error('Invalid ID');
+			}
+			condition = sql.fragment`${sql.join(
+				table.primaryKeyConstraint.keyAttributes.map(
+					(key, idx) =>
+						sql.fragment`${sql.identifier(key.name)} = ${gql2pg(
+							identifiers[idx],
+							key.type,
+							key.typeModifier,
+						)}`,
+				),
+				') and (',
+			)}`;
+		} catch (e) {
+			debug(e);
+			throw e;
+		}
+	} else {
+		const { keyAttributes: keys } = pgFieldConstraint;
+		condition = sql.fragment`(${sql.join(
+			keys.map(
+				key =>
+					sql.fragment`${sql.identifier(key.name)} = ${gql2pg(
+						input[inflection.column(key)],
+						key.type,
+						key.typeModifier,
+					)}`,
+			),
+			') and (',
+		)})`;
+	}
+	table.attributes
+		.filter(attr => pgColumnFilter(attr, build, context))
+		.filter(attr => !omit(attr, 'update'))
+		.forEach(attr => {
+			const fieldName = inflection.column(attr);
+			if (fieldName in inputData) {
+				const val = inputData[fieldName];
+				sqlColumns.push(sql.identifier(attr.name));
+				sqlValues.push(gql2pg(val, attr.type, attr.typeModifier));
+			}
+		});
+
+	let mutationQuery;
+	if (sqlColumns.length) {
+		mutationQuery = sql.query`
+			update ${sql.identifier(table.namespace.name, table.name)} set ${sql.join(
+			sqlColumns.map((col, i) => sql.fragment`${col} = ${sqlValues[i]}`),
+			', ',
+		)}
+			where ${condition}
+			returning *`;
+	} else {
+		mutationQuery = sql.query`
+			select * from ${sql.identifier(table.namespace.name, table.name)}
+			where ${condition}`;
+	}
+	return mutationQuery;
+};
+
+const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
+	const {
+		inflection,
+		pgSql: sql,
+		parseResolveInfo,
+		getTypeByName,
 		pgQueryFromResolveData: queryFromResolveData,
 		pgNestedPluginForwardInputTypes,
 		pgNestedPluginReverseInputTypes,
@@ -71,16 +195,13 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 		pgNestedTableUpdaterFields,
 		pgNestedTableUpdate,
 		pgViaTemporaryTable: viaTemporaryTable,
-		pgGetGqlTypeByTypeIdAndModifier,
 	} = build;
 
 	const {
 		scope: {
 			isPgCreateMutationField,
 			isPgUpdateMutationField,
-			isPgNodeMutation,
 			pgFieldIntrospection: table,
-			pgFieldConstraint,
 		},
 		addArgDataGenerator,
 		getDataFromParsedResolveInfoFragment,
@@ -97,8 +218,6 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 		pgNestedResolvers[table.id] = field.resolve;
 		return field;
 	}
-
-	const TableType = pgGetGqlTypeByTypeIdAndModifier(table.type.id, null);
 
 	// Ensure the table's primary keys are always available in a query.
 	const tablePrimaryKey = table.constraints.find(con => con.type === 'p');
@@ -251,105 +370,16 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 			let mutationQuery = null;
 
 			if (isPgCreateMutationField) {
-				const sqlColumns = [];
-				const sqlValues = [];
-				table.attributes
-					.filter(attr => pgColumnFilter(attr, build, context))
-					.filter(attr => !omit(attr, 'create'))
-					.forEach(attr => {
-						const fieldName = inflection.column(attr);
-						const val = inputData[fieldName];
-						if (Object.prototype.hasOwnProperty.call(inputData, fieldName)) {
-							sqlColumns.push(sql.identifier(attr.name));
-							sqlValues.push(gql2pg(val, attr.type, attr.typeModifier));
-						}
-					});
-
-				/* eslint indent: 0 */
-				mutationQuery = sql.query`
-            insert into ${sql.identifier(table.namespace.name, table.name)}
-              ${
-								sqlColumns.length
-									? sql.fragment`(
-                    ${sql.join(sqlColumns, ', ')}
-                  ) values(${sql.join(sqlValues, ', ')})`
-									: sql.fragment`default values`
-							} returning *`;
+				mutationQuery = pgCreateMutationField(
+					{ table, build, context },
+					inputData,
+				);
 			} else if (isPgUpdateMutationField) {
-				const sqlColumns = [];
-				const sqlValues = [];
-				let condition = null;
-
-				if (isPgNodeMutation) {
-					const nodeId = input[nodeIdFieldName];
-					try {
-						const { Type, identifiers } = getTypeAndIdentifiersFromNodeId(
-							nodeId,
-						);
-						const primaryKeys = table.primaryKeyConstraint.keyAttributes;
-						if (Type !== TableType) {
-							throw new Error('Mismatched type');
-						}
-						if (identifiers.length !== primaryKeys.length) {
-							throw new Error('Invalid ID');
-						}
-						condition = sql.fragment`${sql.join(
-							table.primaryKeyConstraint.keyAttributes.map(
-								(key, idx) =>
-									sql.fragment`${sql.identifier(key.name)} = ${gql2pg(
-										identifiers[idx],
-										key.type,
-										key.typeModifier,
-									)}`,
-							),
-							') and (',
-						)}`;
-					} catch (e) {
-						debug(e);
-						throw e;
-					}
-				} else {
-					const { keyAttributes: keys } = pgFieldConstraint;
-					condition = sql.fragment`(${sql.join(
-						keys.map(
-							key =>
-								sql.fragment`${sql.identifier(key.name)} = ${gql2pg(
-									input[inflection.column(key)],
-									key.type,
-									key.typeModifier,
-								)}`,
-						),
-						') and (',
-					)})`;
-				}
-				table.attributes
-					.filter(attr => pgColumnFilter(attr, build, context))
-					.filter(attr => !omit(attr, 'update'))
-					.forEach(attr => {
-						const fieldName = inflection.column(attr);
-						if (fieldName in inputData) {
-							const val = inputData[fieldName];
-							sqlColumns.push(sql.identifier(attr.name));
-							sqlValues.push(gql2pg(val, attr.type, attr.typeModifier));
-						}
-					});
-
-				if (sqlColumns.length) {
-					mutationQuery = sql.query`
-              update ${sql.identifier(
-								table.namespace.name,
-								table.name,
-							)} set ${sql.join(
-						sqlColumns.map((col, i) => sql.fragment`${col} = ${sqlValues[i]}`),
-						', ',
-					)}
-              where ${condition}
-              returning *`;
-				} else {
-					mutationQuery = sql.query`
-              select * from ${sql.identifier(table.namespace.name, table.name)}
-              where ${condition}`;
-				}
+				mutationQuery = pgUpdateMutationField(
+					{ table, build, context },
+					input,
+					inputData,
+				);
 			}
 
 			const { text, values } = sql.compile(mutationQuery);
@@ -386,6 +416,7 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 						);
 					}
 
+					// console.log(pgNestedTableConnectorFields[foreignTable.id])
 					await Promise.all(
 						pgNestedTableConnectorFields[foreignTable.id]
 							.filter(f => fieldValue[f.fieldName])
@@ -441,6 +472,7 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 											') and (',
 										)}
                   `;
+									console.log({where});
 										const updatedRow = await pgNestedTableUpdate({
 											nestedField,
 											connectorField,
@@ -593,7 +625,7 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 	};
 
 	if (isPgCreateMutationField) {
-		console.log('here', table);
+		// console.log('here', table);
 		pgNestedResolvers[table.id] = newResolver;
 	}
 

@@ -162,6 +162,16 @@ const mapConstraint = (table, build) => {
 			);
 		}
 
+		const isIt = constraint.keyAttributes.some(pKey =>
+			constraint.class.constraints
+				.filter(con => con.type === 'f')
+				.some(con => con.keyAttributes.some(attribute => attribute === pKey)),
+		);
+		if (isIt) {
+			console.log({ constraint });
+			return null;
+		}
+
 		return {
 			constraint,
 			keys: constraint.keyAttributes,
@@ -204,7 +214,7 @@ const hookTable = build => {
 	const { pgOmit: omit } = build;
 
 	return table => {
-		if (table.name === 'students') {
+		if (table.name === 'student_foreign_key') {
 			// debugger;
 		}
 
@@ -214,7 +224,9 @@ const hookTable = build => {
 				.filter(con => con.type === 'u' || con.type === 'p')
 				.filter(con => !omit(con))
 				.filter(con => !con.keyAttributes.some(key => omit(key, 'read')))
-				.map(mapConstraint(table, build)),
+				// .filter(con => !con.keyAttributes.some(key => omit(key, 'connect'))) // HACK
+				.map(mapConstraint(table, build))
+				.filter(_ => _),
 		];
 	};
 };
@@ -228,7 +240,14 @@ const filterPrimaryKeyConstraints = build => {
 	const { nodeIdFieldName } = build;
 	return table => {
 		const { primaryKeyConstraint } = table;
-		return nodeIdFieldName && primaryKeyConstraint;
+
+		const isIt = primaryKeyConstraint.keyAttributes.some(pKey =>
+			primaryKeyConstraint.class.constraints
+				.filter(con => con.type === 'f')
+				.some(con => con.keyAttributes.some(attribute => attribute === pKey)),
+		);
+		console.log({ isIt });
+		return !isIt && nodeIdFieldName && primaryKeyConstraint;
 	};
 };
 
@@ -291,11 +310,14 @@ const graphQLObjectTypeFieldsHook = (fields, build, context) => {
 		cls => cls.namespace && cls.isSelectable,
 	);
 
+	const write = require('./helpers');
+	write('../tables.js', tables);
+
 	tables
 		.map(hookTable(build, context))
 		.reduce(toMap, pgNestedTableConnectorFields); // FIXME side-effecting!
 
-	// TODO handleTablePrimaryKey
+	// TODO check if the pk is identical to the fk?
 	tables
 		.filter(filterPrimaryKeyConstraints(build))
 		.map(handleTablePrimaryKey(build))
@@ -307,6 +329,7 @@ const graphQLObjectTypeFieldsHook = (fields, build, context) => {
 };
 
 module.exports = function PostGraphileNestedConnectorsPlugin(builder) {
+	console.log('woot');
 	builder.hook('inflection', inflectionHook);
 	builder.hook('build', buildHook);
 	builder.hook('GraphQLObjectType:fields', graphQLObjectTypeFieldsHook);

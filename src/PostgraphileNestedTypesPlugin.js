@@ -217,6 +217,8 @@ const graphQLObjectTypeFieldsHook = ({ nestedMutationsDeleteOthers }) => (
 			return;
 		}
 
+		// TODO add the `isIt` check here (but inverted?)
+
 		const keys = constraint.keyAttributes;
 		const isUnique = !!foreignTable.constraints.find(
 			c =>
@@ -252,9 +254,6 @@ const graphQLObjectTypeFieldsHook = ({ nestedMutationsDeleteOthers }) => (
 				name: connectorTypeName,
 				description: `Input for the nested mutation of \`${foreignTableName}\` in the \`${tableTypeName}\` mutation.`,
 				fields: () => {
-					if (table.name === 'students') {
-						// debugger;
-					}
 					const gqlForeignTableType = getGqlInputTypeByTypeIdAndModifier(
 						foreignTable.type.id,
 						null,
@@ -266,6 +265,12 @@ const graphQLObjectTypeFieldsHook = ({ nestedMutationsDeleteOthers }) => (
 							description: `Flag indicating whether all other \`${foreignTableName}\` records that match this relationship should be removed.`,
 							type: GraphQLBoolean,
 						};
+					}
+	
+					// TODO here?
+					if (table.name === 'students') {
+						console.log('this', pgNestedTableConnectorFields[foreignTable.id]);
+						// debugger;
 					}
 					pgNestedTableConnectorFields[foreignTable.id].forEach(
 						({ field, fieldName: connectorFieldName }) => {
@@ -279,6 +284,8 @@ const graphQLObjectTypeFieldsHook = ({ nestedMutationsDeleteOthers }) => (
 							};
 						},
 					);
+
+					// TODO here?
 					pgNestedTableUpdaterFields[table.id][constraint.id].forEach(
 						({ field, fieldName: updaterFieldName }) => {
 							operations[updaterFieldName] = {
