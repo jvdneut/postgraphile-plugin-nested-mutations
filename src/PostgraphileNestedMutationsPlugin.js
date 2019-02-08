@@ -331,7 +331,12 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 		return output;
 	};
 
-	const newResolver = async (data, { input }, { pgClient }, resolveInfo) => {
+	const newResolver = async (
+		data,
+		{ input, nested = false },
+		{ pgClient },
+		resolveInfo,
+	) => {
 		const PayloadType = getTypeByName(
 			isPgUpdateMutationField
 				? inflection.updatePayloadType(table)
@@ -353,14 +358,15 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 			{},
 		);
 
-		const x = Math.ceil(Math.random() * 100);
 		try {
-			await pgClient.query('SAVEPOINT graphql_nested_mutation' + x);
+			if (!nested) {
+				await pgClient.query('SAVEPOINT graphql_nested_mutation');
+			}
 
 			// run forward nested mutations
 			const forwardOutput = await recurseForwardNestedMutations(
 				data,
-				{ input: input[tableFieldName] },
+				{ input: input[tableFieldName], nested: true },
 				{ pgClient },
 				resolveInfo,
 			);
@@ -472,7 +478,7 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 											') and (',
 										)}
                   `;
-									console.log({where});
+										console.log({ where });
 										const updatedRow = await pgNestedTableUpdate({
 											nestedField,
 											connectorField,
@@ -516,6 +522,7 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 										input: {
 											[tableVar]: Object.assign({}, rowData, keyData),
 										},
+										nested: true,
 									},
 									{ pgClient },
 									resolveInfo,
@@ -612,14 +619,18 @@ const graphQLObjectTypeFieldsFieldHook = (field, build, context) => {
 				mutationData = finalRows[0];
 			}
 
-			await pgClient.query('RELEASE SAVEPOINT graphql_nested_mutation' + x);
+			if (!nested) {
+				await pgClient.query('RELEASE SAVEPOINT graphql_nested_mutation');
+			}
 			return {
 				clientMutationId: input.clientMutationId,
 				data: mutationData,
 			};
 		} catch (e) {
 			debug(e);
-			await pgClient.query('ROLLBACK TO SAVEPOINT graphql_nested_mutation' + x);
+			if (!nested) {
+				await pgClient.query('ROLLBACK TO SAVEPOINT graphql_nested_mutation');
+			}
 			throw e;
 		}
 	};
