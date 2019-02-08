@@ -188,11 +188,22 @@ const graphQLObjectTypeFieldsHook = ({ nestedMutationsDeleteOthers }) => (
 			.filter(con => con.type === 'u' || con.type === 'p')
 			.filter(con => !con.keyAttributes.some(key => omit(key)));
 
+		console.log(table.name, { tableTypeName, foreignUniqueConstraints });
+
 		if (table.name === 'students') {
 			/*here*/
 			// debugger;
 		}
-		const connectable = !!foreignUniqueConstraints.length;
+		// TODO add the `isIt` check here (but inverted?)
+		// debugger;
+		const isIt = constraint.keyAttributes.some(pKey =>
+			constraint.class.constraints
+				.filter(con => con.type === 'f')
+				.some(con => con.keyAttributes.some(attribute => attribute === pKey)),
+		);
+
+		console.log({ isIt });
+		const connectable = !!foreignUniqueConstraints.length && !isIt;
 		const creatable =
 			!omit(foreignTable, 'create') &&
 			!omit(constraint, 'create') &&
@@ -216,8 +227,6 @@ const graphQLObjectTypeFieldsHook = ({ nestedMutationsDeleteOthers }) => (
 		) {
 			return;
 		}
-
-		// TODO add the `isIt` check here (but inverted?)
 
 		const keys = constraint.keyAttributes;
 		const isUnique = !!foreignTable.constraints.find(
@@ -266,38 +275,40 @@ const graphQLObjectTypeFieldsHook = ({ nestedMutationsDeleteOthers }) => (
 							type: GraphQLBoolean,
 						};
 					}
-	
+
 					// TODO here?
 					if (table.name === 'students') {
 						console.log('this', pgNestedTableConnectorFields[foreignTable.id]);
 						// debugger;
 					}
-					pgNestedTableConnectorFields[foreignTable.id].forEach(
-						({ field, fieldName: connectorFieldName }) => {
-							operations[connectorFieldName] = {
-								description: `The primary key(s) for \`${foreignTableName}\` for the far side of the relationship.`,
-								type: isForward
-									? field
-									: isUnique
+					if (connectable) {
+						pgNestedTableConnectorFields[foreignTable.id].forEach(
+							({ field, fieldName: connectorFieldName }) => {
+								operations[connectorFieldName] = {
+									description: `The primary key(s) for \`${foreignTableName}\` for the far side of the relationship.`,
+									type: isForward
 										? field
-										: new GraphQLList(new GraphQLNonNull(field)),
-							};
-						},
-					);
+										: isUnique
+											? field
+											: new GraphQLList(new GraphQLNonNull(field)),
+								};
+							},
+						);
 
-					// TODO here?
-					pgNestedTableUpdaterFields[table.id][constraint.id].forEach(
-						({ field, fieldName: updaterFieldName }) => {
-							operations[updaterFieldName] = {
-								description: `The primary key(s) and patch data for \`${foreignTableName}\` for the far side of the relationship.`,
-								type: isForward
-									? field
-									: isUnique
+						// TODO here?
+						pgNestedTableUpdaterFields[table.id][constraint.id].forEach(
+							({ field, fieldName: updaterFieldName }) => {
+								operations[updaterFieldName] = {
+									description: `The primary key(s) and patch data for \`${foreignTableName}\` for the far side of the relationship.`,
+									type: isForward
 										? field
-										: new GraphQLList(new GraphQLNonNull(field)),
-							};
-						},
-					);
+										: isUnique
+											? field
+											: new GraphQLList(new GraphQLNonNull(field)),
+								};
+							},
+						);
+					}
 					if (creatable) {
 						const createInputType = newWithHooks(
 							GraphQLInputObjectType,

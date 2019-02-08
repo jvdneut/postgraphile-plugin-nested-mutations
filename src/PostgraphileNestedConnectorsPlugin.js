@@ -162,6 +162,7 @@ const mapConstraint = (table, build) => {
 			);
 		}
 
+		/*
 		const isIt = constraint.keyAttributes.some(pKey =>
 			constraint.class.constraints
 				.filter(con => con.type === 'f')
@@ -171,6 +172,7 @@ const mapConstraint = (table, build) => {
 			console.log({ constraint });
 			return null;
 		}
+		*/
 
 		return {
 			constraint,
@@ -241,6 +243,7 @@ const filterPrimaryKeyConstraints = build => {
 	return table => {
 		const { primaryKeyConstraint } = table;
 
+		/*
 		const isIt = primaryKeyConstraint.keyAttributes.some(pKey =>
 			primaryKeyConstraint.class.constraints
 				.filter(con => con.type === 'f')
@@ -248,6 +251,8 @@ const filterPrimaryKeyConstraints = build => {
 		);
 		console.log({ isIt });
 		return !isIt && nodeIdFieldName && primaryKeyConstraint;
+		*/
+		return nodeIdFieldName && primaryKeyConstraint;
 	};
 };
 

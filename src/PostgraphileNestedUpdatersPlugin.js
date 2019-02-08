@@ -1,12 +1,48 @@
+const bla = ({ foreignTable, constraint }) => {
+	const [fkConstraints] = constraint.class.constraints
+		.filter(c => c.type === 'f')
+		.filter(c => c.foreignClass === foreignTable);
+
+	if (fkConstraints) {
+		return constraint.keyAttributes.filter(
+			k => !fkConstraints.keyAttributes.some(a => a === k),
+		);
+	}
+
+	return constraint.keyAttributes;
+};
+
 const inflectionHook = (inflection, build) =>
 	build.extend(inflection, {
 		nestedUpdateByNodeIdField() {
 			return this.camelCase(`update_by_${build.nodeIdFieldName}`);
 		},
 		nestedUpdateByKeyField(options) {
-			const { constraint } = options;
+			const { table, constraint } = options;
+
+			const keyAttributes = bla({
+				foreignTable: table,
+				constraint,
+			});
+			/*
+			const [fkConstraints] = constraint.class.constraints
+				.filter(c => c.type === 'f')
+				.filter(c => c.foreignClass === table);
+
+			let keyAttributes = constraint.keyAttributes;
+			if (fkConstraints) {
+				keyAttributes = keyAttributes.filter(
+					k => !fkConstraints.keyAttributes.some(a => a === k),
+				);
+
+				console.log({ keyAttributes });
+			}
+			*/
+
 			return this.camelCase(
-				`update_by_${constraint.keyAttributes.map(k => k.name).join('_and_')}`,
+				keyAttributes.length === 0
+					? 'update'
+					: `update_by_${keyAttributes.map(k => k.name).join('_and_')}`,
 			);
 		},
 		nestedUpdateByNodeIdInputType(options) {
@@ -17,15 +53,22 @@ const inflectionHook = (inflection, build) =>
 			const constraintName = constraint.tags.name || constraint.name;
 
 			return this.upperCamelCase(
-				`${tableFieldName}_on_${parentTableFieldName}_for_${constraintName}_node_id_update`,
+				`zzzz${tableFieldName}_on_${parentTableFieldName}_for_${constraintName}_node_id_update`,
 			);
 		},
 		nestedUpdatePatchType(options) {
 			const { table, constraint } = options;
 
+			// debugger;
 			const tableFieldName = this.tableFieldName(table);
 			const parentTableFieldName = this.tableFieldName(constraint.class);
 			const constraintName = constraint.tags.name || constraint.name;
+
+			return this.camelCase(
+				`yyyyupdate_${tableFieldName}_by_${constraint.keyAttributes
+					.map(a => a.name)
+					.join('_and_')}_patch`,
+			);
 
 			return this.camelCase(
 				`update_${tableFieldName}_on_${parentTableFieldName}_for_${constraintName}_patch`,
@@ -40,7 +83,7 @@ const inflectionHook = (inflection, build) =>
 			const keyConstraintName = keyConstraint.tags.name || keyConstraint.name;
 
 			return this.upperCamelCase(
-				`${tableFieldName}_on_${parentTableFieldName}_for_${constraintName}_using_${keyConstraintName}_update`,
+				`xxxx${tableFieldName}_on_${parentTableFieldName}_for_${constraintName}_using_${keyConstraintName}_update`,
 			);
 		},
 	});
@@ -173,6 +216,7 @@ const mapForeignKeyConstraint = (
 		foreignTableFieldName,
 		patchFieldName,
 		patchType,
+		table,
 	},
 	build,
 ) => {
@@ -200,7 +244,8 @@ const mapForeignKeyConstraint = (
 			keys: keyConstraint.keyAttributes,
 			isNodeIdUpdater: false,
 			fieldName: inflection.nestedUpdateByKeyField({
-				table: foreignTable,
+				table,
+				// table: foreignTable,
 				constraint: keyConstraint,
 			}),
 			field: newWithHooks(
@@ -315,6 +360,8 @@ const getNestedUpdatePatch = (
 		graphql: { GraphQLInputObjectType },
 	} = build;
 
+	return ForeignTablePatch;
+
 	return newWithHooks(
 		GraphQLInputObjectType,
 		{
@@ -327,6 +374,9 @@ const getNestedUpdatePatch = (
 				const omittedFields = constraint.keyAttributes.map(k =>
 					inflection.column(k),
 				);
+				// debugger;
+				console.log({ omittedFields });
+				console.log(ForeignTablePatch._fields);
 				return Object.keys(ForeignTablePatch._fields)
 					.filter(key => !omittedFields.includes(key))
 					.map(k => Object.assign({}, { [k]: ForeignTablePatch._fields[k] }))
@@ -364,6 +414,9 @@ const mapConstraint = (table, build) => {
 			inflection.patchType(ForeignTableType.name),
 		);
 
+		// debugger;
+		console.log(inflection.patchType(ForeignTableType.name));
+
 		const patchType = getNestedUpdatePatch(
 			{
 				foreignTable,
@@ -386,6 +439,7 @@ const mapConstraint = (table, build) => {
 						foreignTableFieldName,
 						patchFieldName,
 						patchType,
+						table,
 					},
 					build,
 				),
@@ -408,7 +462,7 @@ const mapConstraint = (table, build) => {
 		}
 
 		pgNestedTableUpdaterFields[table.id][constraint.id] = foreignFields;
-		console.log('one', {pgNestedTableUpdaterFields});
+		console.log('one', { pgNestedTableUpdaterFields });
 	};
 };
 const hookTable = build => {
